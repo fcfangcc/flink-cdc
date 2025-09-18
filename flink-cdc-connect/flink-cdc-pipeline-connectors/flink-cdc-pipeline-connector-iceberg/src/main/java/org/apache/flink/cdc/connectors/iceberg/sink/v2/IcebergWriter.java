@@ -87,6 +87,11 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
         this.taskId = taskId;
         this.attemptId = attemptId;
         this.zoneId = zoneId;
+        LOGGER.info(
+                "init IcebergWriter with: zoneId={} attemptId={},taskId={}",
+                zoneId,
+                attemptId,
+                taskId);
     }
 
     @Override

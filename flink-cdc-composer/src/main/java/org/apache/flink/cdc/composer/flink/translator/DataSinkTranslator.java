@@ -187,6 +187,7 @@ public class DataSinkTranslator {
                                 new DataSinkWriterOperatorFactory<>(
                                         sink, isBatchMode, schemaOperatorID))
                         .uid(operatorUidGenerator.generateUid("sink-writer"));
+                        // .setParallelism(1);
 
         DataStream<CommittableMessage<CommT>> preCommitted = written;
         if (sink instanceof WithPreCommitTopology) {
@@ -204,6 +205,7 @@ public class DataSinkTranslator {
                                 getCommitterOperatorFactory(
                                         sink, isBatchMode, isCheckpointingEnabled))
                         .uid(operatorUidGenerator.generateUid("sink-committer"));
+                        // .setParallelism(1);
 
         if (sink instanceof WithPostCommitTopology) {
             ((WithPostCommitTopology<Event, CommT>) sink).addPostCommitTopology(committed);

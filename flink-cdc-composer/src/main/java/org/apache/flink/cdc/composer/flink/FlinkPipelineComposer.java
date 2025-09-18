@@ -200,6 +200,9 @@ public class FlinkPipelineComposer implements PipelineComposer {
                         dataSource.supportedMetadataColumns(),
                         operatorUidGenerator);
 
+        System.out.println(
+                "debug log with isParallelMetadataSource: "
+                        + Boolean.toString(isParallelMetadataSource));
         if (isParallelMetadataSource) {
             // Translate a distributed topology for sources with distributed tables
             // PostTransform -> Partitioning
