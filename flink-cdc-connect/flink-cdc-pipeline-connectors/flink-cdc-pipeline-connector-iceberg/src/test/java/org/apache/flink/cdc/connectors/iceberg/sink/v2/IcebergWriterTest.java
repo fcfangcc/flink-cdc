@@ -349,6 +349,84 @@ public class IcebergWriterTest {
                         "char, varchar, string, false, [1,2,3,4,5,], [1,2,3,4,5,6,7,8,9,10,], 0.00, 1, -1, 2, -2, 12345, 12345, 123.456, 123456.789, 00:00:12.345, 2003-10-20, 1970-01-01T00:00, 1970-01-01T00:00Z, 1970-01-01T00:00Z");
     }
 
+    @Test
+    public void testWriteTwiceInOneCheckpoint() throws Exception {
+        Map<String, String> catalogOptions = new HashMap<>();
+        String warehouse =
+                new File(temporaryFolder.toFile(), UUID.randomUUID().toString()).toString();
+        catalogOptions.put("type", "hadoop");
+        catalogOptions.put("warehouse", warehouse);
+        catalogOptions.put("cache-enabled", "false");
+        Catalog catalog =
+                CatalogUtil.buildIcebergCatalog(
+                        "cdc-iceberg-catalog", catalogOptions, new Configuration());
+        IcebergWriter icebergWriter =
+                new IcebergWriter(catalogOptions, 1, 1, ZoneId.systemDefault());
+        IcebergMetadataApplier icebergMetadataApplier = new IcebergMetadataApplier(catalogOptions);
+        TableId tableId = TableId.parse("test.iceberg_table");
+
+        // Create Table.
+        CreateTableEvent createTableEvent =
+                new CreateTableEvent(
+                        tableId,
+                        Schema.newBuilder()
+                                .physicalColumn(
+                                        "id",
+                                        DataTypes.BIGINT().notNull(),
+                                        "column for id",
+                                        "AUTO_DECREMENT()")
+                                .physicalColumn(
+                                        "name",
+                                        DataTypes.VARCHAR(255).notNull(),
+                                        "column for name",
+                                        "John Smith")
+                                .primaryKey("id")
+                                .build());
+        icebergMetadataApplier.applySchemaChange(createTableEvent);
+        icebergWriter.write(createTableEvent, null);
+        BinaryRecordDataGenerator binaryRecordDataGenerator =
+                new BinaryRecordDataGenerator(
+                        createTableEvent.getSchema().getColumnDataTypes().toArray(new DataType[0]));
+        RecordData recordData =
+                binaryRecordDataGenerator.generate(
+                        new Object[] {1L, BinaryStringData.fromString("A")});
+        DataChangeEvent dataChangeEvent = DataChangeEvent.insertEvent(tableId, recordData);
+        icebergWriter.write(dataChangeEvent, null);
+        Collection<WriteResultWrapper> writeResults = icebergWriter.prepareCommit();
+        IcebergCommitter icebergCommitter = new IcebergCommitter(catalogOptions);
+        Collection<Committer.CommitRequest<WriteResultWrapper>> collection =
+                writeResults.stream().map(MockCommitRequestImpl::new).collect(Collectors.toList());
+        icebergCommitter.commit(collection);
+        List<String> result = fetchTableContent(catalog, tableId);
+        Assertions.assertThat(result).containsExactlyInAnyOrder("1, A");
+
+        // Add column.
+        RecordData recordData2 =
+                binaryRecordDataGenerator.generate(
+                        new Object[] {
+                            1L, BinaryStringData.fromString("B"),
+                        });
+        DataChangeEvent dataChangeEvent3 =
+                DataChangeEvent.updateEvent(tableId, recordData, recordData2);
+        icebergWriter.write(dataChangeEvent3, null);
+        icebergWriter.flush(false); // 稳定复现，去掉就正常
+        RecordData recordData3 =
+                binaryRecordDataGenerator.generate(
+                        new Object[] {
+                            1L, BinaryStringData.fromString("C"),
+                        });
+        DataChangeEvent dataChangeEvent4 =
+                DataChangeEvent.updateEvent(tableId, recordData2, recordData3);
+        icebergWriter.write(dataChangeEvent4, null);
+        icebergWriter.flush(false);
+        writeResults = icebergWriter.prepareCommit();
+        collection =
+                writeResults.stream().map(MockCommitRequestImpl::new).collect(Collectors.toList());
+        icebergCommitter.commit(collection);
+        result = fetchTableContent(catalog, tableId);
+        Assertions.assertThat(result).containsExactlyInAnyOrder("1, C");
+    }
+
     /** Mock CommitRequestImpl. */
     public static class MockCommitRequestImpl<CommT> extends CommitRequestImpl<CommT> {
 
