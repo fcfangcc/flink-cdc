@@ -45,10 +45,12 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /** A {@link SinkWriter} for Apache Iceberg. */
 public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWrapper> {
@@ -150,12 +152,34 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
     @Override
     public void flush(boolean flush) throws IOException {
         // Notice: flush method may be called many times during one checkpoint.
-        temporaryWriteResult.addAll(getWriteResult());
+        LOGGER.info("start flush with attemptId:{}, taskId: {}", this.attemptId, this.taskId);
+        // temporaryWriteResult.addAll(getWriteResult());
     }
 
     private List<WriteResultWrapper> getWriteResult() throws IOException {
         List<WriteResultWrapper> writeResults = new ArrayList<>();
         for (Map.Entry<TableId, TaskWriter<RowData>> entry : writerMap.entrySet()) {
+            String fileInfo = "no-delete-file";
+            try {
+                fileInfo =
+                        Arrays.stream(entry.getValue().dataFiles())
+                                .map(
+                                        f ->
+                                                "file_path:"
+                                                        + f.location()
+                                                        + ", content:"
+                                                        + Integer.toString(f.content().id()))
+                                .collect(Collectors.joining("\n"));
+            } catch (java.lang.IllegalArgumentException ignored) {
+                //     ignore no delete file error
+            }
+
+            LOGGER.info(
+                    "flush complete file attemptId:{}, taskId: {}, table: {}, files: {}",
+                    this.attemptId,
+                    this.taskId,
+                    entry.getKey().getTableName(),
+                    fileInfo);
             WriteResultWrapper writeResultWrapper =
                     new WriteResultWrapper(entry.getValue().complete(), entry.getKey());
             writeResults.add(writeResultWrapper);

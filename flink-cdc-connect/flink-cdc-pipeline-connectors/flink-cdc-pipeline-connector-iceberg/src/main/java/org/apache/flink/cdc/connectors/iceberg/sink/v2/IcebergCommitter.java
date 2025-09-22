@@ -84,6 +84,7 @@ public class IcebergCommitter implements Committer<WriteResultWrapper> {
 
     private void commit(List<WriteResultWrapper> writeResultWrappers) {
         Map<TableId, List<WriteResult>> tableMap = new HashMap<>();
+        LOGGER.info("start flush and commit sink");
         for (WriteResultWrapper writeResultWrapper : writeResultWrappers) {
             List<WriteResult> writeResult =
                     tableMap.getOrDefault(writeResultWrapper.getTableId(), new ArrayList<>());
