@@ -94,6 +94,7 @@ public class IcebergSink
     public SinkWriter<Event> createWriter(InitContext context) {
         return new IcebergWriter(
                 catalogOptions,
+                tableOptions,
                 context.getTaskInfo().getIndexOfThisSubtask(),
                 context.getTaskInfo().getAttemptNumber(),
                 zoneId);
@@ -103,6 +104,7 @@ public class IcebergSink
     public SinkWriter<Event> createWriter(WriterInitContext context) {
         return new IcebergWriter(
                 catalogOptions,
+                tableOptions,
                 context.getTaskInfo().getIndexOfThisSubtask(),
                 context.getTaskInfo().getAttemptNumber(),
                 zoneId);

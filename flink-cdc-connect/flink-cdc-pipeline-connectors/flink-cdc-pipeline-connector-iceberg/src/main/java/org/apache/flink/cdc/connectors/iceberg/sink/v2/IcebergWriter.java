@@ -57,7 +57,9 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
 
     public static final String DEFAULT_FILE_FORMAT = "parquet";
 
-    public static final long DEFAULT_MAX_FILE_SIZE = 256 * 1024 * 1024;
+    public static final String DEFAULT_MAX_FILE_SIZE = Integer.toString(256 * 1024 * 1024);
+
+    public static final String TABLE_FILE_SIZE_KEY = "write.target-file-size-bytes";
 
     private Map<TableId, RowDataTaskWriterFactory> writerFactoryMap;
 
@@ -75,8 +77,14 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
 
     private final ZoneId zoneId;
 
+    private final long targetFileSizeBytes;
+
     public IcebergWriter(
-            Map<String, String> catalogOptions, int taskId, int attemptId, ZoneId zoneId) {
+            Map<String, String> catalogOptions,
+            Map<String, String> tableOptions,
+            int taskId,
+            int attemptId,
+            ZoneId zoneId) {
         catalog =
                 CatalogUtil.buildIcebergCatalog(
                         this.getClass().getSimpleName(), catalogOptions, new Configuration());
@@ -84,9 +92,13 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
         writerMap = new HashMap<>();
         schemaMap = new HashMap<>();
         temporaryWriteResult = new ArrayList<>();
+        this.targetFileSizeBytes =
+                Long.parseLong(
+                        tableOptions.getOrDefault(TABLE_FILE_SIZE_KEY, DEFAULT_MAX_FILE_SIZE));
         this.taskId = taskId;
         this.attemptId = attemptId;
         this.zoneId = zoneId;
+        LOGGER.debug("new IcebergWriter with targetFileSizeBytes: {}", targetFileSizeBytes);
     }
 
     @Override
@@ -111,7 +123,7 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
                 new RowDataTaskWriterFactory(
                         table,
                         rowType,
-                        DEFAULT_MAX_FILE_SIZE,
+                        targetFileSizeBytes,
                         FileFormat.fromString(DEFAULT_FILE_FORMAT),
                         new HashMap<>(),
                         new ArrayList<>(table.schema().identifierFieldIds()),
@@ -156,10 +168,7 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
     @Override
     public void flush(boolean endOfInput) throws IOException {
         // Notice: flush method may be called many times during one checkpoint.
-        LOGGER.info(
-                "Got flush event with taskId: {}, endOfInput:{}",
-                this.taskId,
-                endOfInput);
+        LOGGER.info("Got flush event with taskId: {}, endOfInput:{}", this.taskId, endOfInput);
         // temporaryWriteResult.addAll(getWriteResult());
     }
 
