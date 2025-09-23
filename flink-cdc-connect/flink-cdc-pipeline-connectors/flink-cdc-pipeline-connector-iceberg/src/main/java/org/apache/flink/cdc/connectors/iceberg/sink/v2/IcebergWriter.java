@@ -45,12 +45,10 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /** A {@link SinkWriter} for Apache Iceberg. */
 public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWrapper> {
@@ -89,15 +87,16 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
         this.taskId = taskId;
         this.attemptId = attemptId;
         this.zoneId = zoneId;
-        LOGGER.info(
-                "init IcebergWriter with: zoneId={} attemptId={},taskId={}",
-                zoneId,
-                attemptId,
-                taskId);
     }
 
     @Override
     public Collection<WriteResultWrapper> prepareCommit() throws IOException, InterruptedException {
+        // 可能多次prepareCommit合并成一次commit
+        LOGGER.info(
+                "start with prepareCommit, zoneId={}, attemptId={},taskId={}",
+                zoneId,
+                attemptId,
+                taskId);
         List<WriteResultWrapper> list = new ArrayList<>();
         list.addAll(temporaryWriteResult);
         list.addAll(getWriteResult());
@@ -138,6 +137,11 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
         } else {
             SchemaChangeEvent schemaChangeEvent = (SchemaChangeEvent) event;
             TableId tableId = schemaChangeEvent.tableId();
+            LOGGER.info(
+                    "Got schema change event tableId: {}, class:{} -> {}",
+                    tableId.getTableName(),
+                    schemaChangeEvent.getClass().getName(),
+                    schemaChangeEvent);
             TableSchemaWrapper tableSchemaWrapper = schemaMap.get(tableId);
 
             Schema newSchema =
@@ -150,40 +154,27 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
     }
 
     @Override
-    public void flush(boolean flush) throws IOException {
+    public void flush(boolean endOfInput) throws IOException {
         // Notice: flush method may be called many times during one checkpoint.
-        LOGGER.info("start flush with attemptId:{}, taskId: {}", this.attemptId, this.taskId);
+        LOGGER.info(
+                "Got flush event with taskId: {}, endOfInput:{}",
+                this.taskId,
+                endOfInput);
         // temporaryWriteResult.addAll(getWriteResult());
     }
 
     private List<WriteResultWrapper> getWriteResult() throws IOException {
         List<WriteResultWrapper> writeResults = new ArrayList<>();
         for (Map.Entry<TableId, TaskWriter<RowData>> entry : writerMap.entrySet()) {
-            String fileInfo = "no-delete-file";
-            try {
-                fileInfo =
-                        Arrays.stream(entry.getValue().dataFiles())
-                                .map(
-                                        f ->
-                                                "file_path:"
-                                                        + f.location()
-                                                        + ", content:"
-                                                        + Integer.toString(f.content().id()))
-                                .collect(Collectors.joining("\n"));
-            } catch (java.lang.IllegalArgumentException ignored) {
-                //     ignore no delete file error
-            }
 
-            LOGGER.info(
-                    "flush complete file attemptId:{}, taskId: {}, table: {}, files: {}",
-                    this.attemptId,
-                    this.taskId,
-                    entry.getKey().getTableName(),
-                    fileInfo);
             WriteResultWrapper writeResultWrapper =
                     new WriteResultWrapper(entry.getValue().complete(), entry.getKey());
             writeResults.add(writeResultWrapper);
-            LOGGER.info(writeResultWrapper.buildDescription());
+            LOGGER.info(
+                    "flush complete file taskId: {}, table: {}, writeResult: {}",
+                    this.taskId,
+                    entry.getKey().getTableName(),
+                    writeResultWrapper.buildDescription());
         }
         writerMap.clear();
         writerFactoryMap.clear();

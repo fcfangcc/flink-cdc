@@ -65,7 +65,11 @@ public class WriteResultWrapper implements Serializable {
                 + tableId
                 + ", AddCount: "
                 + addCount
+                + ", AddDataFiles: "
+                + writeResult.dataFiles().length
                 + ", DeleteCount: "
-                + deleteCount;
+                + deleteCount
+                + ", AddDeleteFiles: "
+                + writeResult.deleteFiles().length;
     }
 }
