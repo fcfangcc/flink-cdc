@@ -25,14 +25,12 @@ import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.api.connector.sink2.TwoPhaseCommittingSink;
 import org.apache.flink.api.connector.sink2.WriterInitContext;
 import org.apache.flink.cdc.common.event.Event;
-import org.apache.flink.cdc.common.event.TableId;
 import org.apache.flink.cdc.connectors.iceberg.sink.v2.compaction.CompactionOperator;
 import org.apache.flink.cdc.connectors.iceberg.sink.v2.compaction.CompactionOptions;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.metrics.groups.SinkCommitterMetricGroup;
 import org.apache.flink.streaming.api.connector.sink2.CommittableMessage;
 import org.apache.flink.streaming.api.connector.sink2.CommittableMessageTypeInfo;
-import org.apache.flink.streaming.api.connector.sink2.CommittableWithLineage;
 import org.apache.flink.streaming.api.connector.sink2.WithPostCommitTopology;
 import org.apache.flink.streaming.api.connector.sink2.WithPreCommitTopology;
 import org.apache.flink.streaming.api.connector.sink2.WithPreWriteTopology;
@@ -40,7 +38,6 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 
 import java.time.ZoneId;
 import java.util.Map;
-import java.util.Objects;
 
 /** A {@link Sink} implementation for Apache Iceberg. */
 public class IcebergSink
@@ -129,36 +126,15 @@ public class IcebergSink
         if (compactionOptions.isEnabled()) {
             TypeInformation<CommittableMessage<WriteResultWrapper>> typeInformation =
                     CommittableMessageTypeInfo.of(this::getCommittableSerializer);
-
-            int parallelism =
-                    compactionOptions.getParallelism() == -1
-                            ? committableMessageDataStream.getParallelism()
-                            : compactionOptions.getParallelism();
-
-            // Shuffle by different table id.
-            DataStream<CommittableMessage<WriteResultWrapper>> keyedStream =
-                    committableMessageDataStream.partitionCustom(
-                            (bucket, numPartitions) -> bucket % numPartitions,
-                            (committableMessage) -> {
-                                if (committableMessage instanceof CommittableWithLineage) {
-                                    WriteResultWrapper multiTableCommittable =
-                                            ((CommittableWithLineage<WriteResultWrapper>)
-                                                            committableMessage)
-                                                    .getCommittable();
-                                    TableId tableId = multiTableCommittable.getTableId();
-                                    return tableId.hashCode();
-                                } else {
-                                    return Objects.hash(committableMessage);
-                                }
-                            });
-
-            // Small file compaction.
-            keyedStream
+            // Refer to
+            // https://github.com/apache/iceberg/blob/317ebe53ea295e92e440913c6369189a664691db/flink/v2.0/flink/src/main/java/org/apache/iceberg/flink/sink/IcebergSink.java#L255-L260
+            committableMessageDataStream
+                    .global()
                     .transform(
                             "Compaction",
                             typeInformation,
                             new CompactionOperator(catalogOptions, compactionOptions))
-                    .setParallelism(parallelism);
+                    .forceNonParallel();
         }
     }
 }

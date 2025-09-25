@@ -50,6 +50,10 @@ public class CompactionOptions implements Serializable {
         return parallelism;
     }
 
+    public boolean parallelismIsEmpty() {
+        return parallelism == -1;
+    }
+
     public void setParallelism(int parallelism) {
         this.parallelism = parallelism;
     }

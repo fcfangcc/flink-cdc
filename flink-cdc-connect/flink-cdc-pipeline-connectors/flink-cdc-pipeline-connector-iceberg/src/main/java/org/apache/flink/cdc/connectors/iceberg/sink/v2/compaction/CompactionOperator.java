@@ -34,6 +34,7 @@ import org.apache.iceberg.actions.RewriteDataFilesActionResult;
 import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.flink.actions.Actions;
+import org.apache.iceberg.flink.actions.RewriteDataFilesAction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -82,6 +83,7 @@ public class CompactionOperator
                     Executors.newSingleThreadScheduledExecutor(
                             new ExecutorThreadFactory(
                                     Thread.currentThread().getName() + "-Cdc-Compaction"));
+            LOGGER.info("init compactExecutor");
         }
     }
 
@@ -110,24 +112,29 @@ public class CompactionOperator
     }
 
     private void compact(TableId tableId) {
+        LOGGER.info("Got compact request: {}", tableId.identifier());
         if (catalog == null) {
             catalog =
                     CatalogUtil.buildIcebergCatalog(
                             this.getClass().getSimpleName(), catalogOptions, new Configuration());
         }
         try {
-            RewriteDataFilesActionResult rewriteResult =
+            RewriteDataFilesAction rewriteAction =
                     Actions.forTable(
                                     StreamExecutionEnvironment.createLocalEnvironment(),
                                     catalog.loadTable(TableIdentifier.parse(tableId.identifier())))
-                            .rewriteDataFiles()
-                            .execute();
+                            .rewriteDataFiles();
+            if (!this.compactionOptions.parallelismIsEmpty()) {
+                rewriteAction.maxParallelism(this.compactionOptions.getParallelism());
+            }
+            RewriteDataFilesActionResult rewriteResult = rewriteAction.execute();
             LOGGER.info(
                     "Iceberg small file compact result for {}: added {} data files and deleted {} files.",
                     tableId.identifier(),
                     rewriteResult.addedDataFiles().size(),
                     rewriteResult.deletedDataFiles().size());
         } catch (Throwable t) {
+            LOGGER.error("compact ERROR: {}", t.getMessage());
             throwable = t;
         }
     }
