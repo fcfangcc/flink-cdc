@@ -38,6 +38,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -83,47 +84,62 @@ public class IcebergCommitter implements Committer<WriteResultWrapper> {
     }
 
     private void commit(List<WriteResultWrapper> writeResultWrappers) {
-        Map<TableId, List<WriteResult>> tableMap = new HashMap<>();
+        Map<TableId, List<WriteResultWrapper>> tableMap = new HashMap<>();
         for (WriteResultWrapper writeResultWrapper : writeResultWrappers) {
-            List<WriteResult> writeResult =
+            List<WriteResultWrapper> writeResult =
                     tableMap.getOrDefault(writeResultWrapper.getTableId(), new ArrayList<>());
-            writeResult.add(writeResultWrapper.getWriteResult());
+            writeResult.add(writeResultWrapper);
             tableMap.put(writeResultWrapper.getTableId(), writeResult);
             LOGGER.info(writeResultWrapper.buildDescription());
         }
-        for (Map.Entry<TableId, List<WriteResult>> entry : tableMap.entrySet()) {
-            TableId tableId = entry.getKey();
-            Optional<TableMetric> tableMetric = getTableMetric(tableId);
-            tableMetric.ifPresent(TableMetric::increaseCommitTimes);
-            Table table =
-                    catalog.loadTable(
-                            TableIdentifier.of(tableId.getSchemaName(), tableId.getTableName()));
-            List<WriteResult> results = entry.getValue();
-            List<DataFile> dataFiles =
-                    results.stream()
-                            .filter(payload -> payload.dataFiles() != null)
-                            .flatMap(payload -> Arrays.stream(payload.dataFiles()))
-                            .filter(dataFile -> dataFile.recordCount() > 0)
-                            .collect(toList());
-            List<DeleteFile> deleteFiles =
-                    results.stream()
-                            .filter(payload -> payload.deleteFiles() != null)
-                            .flatMap(payload -> Arrays.stream(payload.deleteFiles()))
-                            .filter(deleteFile -> deleteFile.recordCount() > 0)
-                            .collect(toList());
-            if (dataFiles.isEmpty() && deleteFiles.isEmpty()) {
-                LOGGER.info(String.format("Nothing to commit to table %s, skipping", table.name()));
+        for (Map.Entry<TableId, List<WriteResultWrapper>> entry : tableMap.entrySet()) {
+            flushWriteResults(entry.getKey(), entry.getValue());
+        }
+    }
+
+    private void flushWriteResults(TableId tableId, List<WriteResultWrapper> results) {
+        List<DataFile> dataFiles = new ArrayList<>();
+        List<DeleteFile> deleteFiles = new ArrayList<>();
+        results.sort(Comparator.comparingLong(WriteResultWrapper::getTimestamp));
+        for (WriteResultWrapper result : results) {
+            WriteResult writeResult = result.getWriteResult();
+            if (writeResult.dataFiles() != null) {
+                dataFiles.addAll(Arrays.asList(writeResult.dataFiles()));
+            }
+            if (writeResult.deleteFiles() != null) {
+                deleteFiles.addAll(Arrays.asList(writeResult.deleteFiles()));
+            }
+
+            if (result.getCommitImmediately()) {
+                commitSnapshot(tableId, dataFiles, deleteFiles);
+                dataFiles.clear();
+                deleteFiles.clear();
+            }
+        }
+        commitSnapshot(tableId, dataFiles, deleteFiles);
+    }
+
+    private void commitSnapshot(
+            TableId tableId, List<DataFile> dataFiles, List<DeleteFile> deleteFiles) {
+        Optional<TableMetric> tableMetric = getTableMetric(tableId);
+        tableMetric.ifPresent(TableMetric::increaseCommitTimes);
+
+        Table table =
+                catalog.loadTable(
+                        TableIdentifier.of(tableId.getSchemaName(), tableId.getTableName()));
+
+        if (dataFiles.isEmpty() && deleteFiles.isEmpty()) {
+            LOGGER.info(String.format("Nothing to commit to table %s, skipping", table.name()));
+        } else {
+            if (deleteFiles.isEmpty()) {
+                AppendFiles append = table.newAppend();
+                dataFiles.forEach(append::appendFile);
+                append.commit();
             } else {
-                if (deleteFiles.isEmpty()) {
-                    AppendFiles append = table.newAppend();
-                    dataFiles.forEach(append::appendFile);
-                    append.commit();
-                } else {
-                    RowDelta delta = table.newRowDelta();
-                    dataFiles.forEach(delta::addRows);
-                    deleteFiles.forEach(delta::addDeletes);
-                    delta.commit();
-                }
+                RowDelta delta = table.newRowDelta();
+                dataFiles.forEach(delta::addRows);
+                deleteFiles.forEach(delta::addDeletes);
+                delta.commit();
             }
         }
     }
