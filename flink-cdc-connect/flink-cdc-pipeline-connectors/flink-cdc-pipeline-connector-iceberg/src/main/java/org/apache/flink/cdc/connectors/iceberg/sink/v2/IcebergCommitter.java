@@ -31,7 +31,6 @@ import org.apache.iceberg.RowDelta;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.TableIdentifier;
-import org.apache.iceberg.io.WriteResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,10 +39,10 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 import static java.util.stream.Collectors.toList;
 
@@ -86,42 +85,57 @@ public class IcebergCommitter implements Committer<WriteResultWrapper> {
 
     private void commit(List<WriteResultWrapper> writeResultWrappers) {
         LOGGER.info("start flush and commit sink");
-        Map<TableId, List<WriteResultWrapper>> tableMap = new HashMap<>();
+        Map<TableId, List<WriteResultWrapper>> resultMap = new HashMap<>();
+        Map<TableId, LinkedHashMap<Long, List<WriteResultWrapper>>> eventResultMap =
+                new HashMap<>();
+        writeResultWrappers.sort(Comparator.comparingLong(WriteResultWrapper::getTimestamp));
         for (WriteResultWrapper writeResultWrapper : writeResultWrappers) {
-            List<WriteResultWrapper> writeResult =
-                    tableMap.getOrDefault(writeResultWrapper.getTableId(), new ArrayList<>());
+            List<WriteResultWrapper> writeResult;
+            Long eventId = writeResultWrapper.getEventId();
+            if (eventId == null) {
+                writeResult =
+                        resultMap.computeIfAbsent(
+                                writeResultWrapper.getTableId(), k -> new ArrayList<>());
+            } else {
+
+                writeResult =
+                        eventResultMap
+                                .computeIfAbsent(
+                                        writeResultWrapper.getTableId(), k -> new LinkedHashMap<>())
+                                .computeIfAbsent(eventId, k -> new ArrayList<>());
+            }
             writeResult.add(writeResultWrapper);
-            tableMap.put(writeResultWrapper.getTableId(), writeResult);
+
             LOGGER.info(writeResultWrapper.buildDescription());
         }
-        for (Map.Entry<TableId, List<WriteResultWrapper>> entry : tableMap.entrySet()) {
+
+        for (Map.Entry<TableId, LinkedHashMap<Long, List<WriteResultWrapper>>> entry1 :
+                eventResultMap.entrySet()) {
+            for (List<WriteResultWrapper> eventResults : entry1.getValue().values()) {
+                flushWriteResults(entry1.getKey(), eventResults);
+            }
+        }
+
+        for (Map.Entry<TableId, List<WriteResultWrapper>> entry : resultMap.entrySet()) {
             flushWriteResults(entry.getKey(), entry.getValue());
         }
     }
 
     private void flushWriteResults(TableId tableId, List<WriteResultWrapper> results) {
-        List<DataFile> dataFiles = new ArrayList<>();
-        List<DeleteFile> deleteFiles = new ArrayList<>();
-        results.sort(Comparator.comparingLong(WriteResultWrapper::getTimestamp));
-        LOGGER.info(
+        List<DataFile> dataFiles =
                 results.stream()
-                        .map(WriteResultWrapper::buildDescription)
-                        .collect(Collectors.joining(" | ")));
-        for (WriteResultWrapper result : results) {
-            WriteResult writeResult = result.getWriteResult();
-            if (writeResult.dataFiles() != null) {
-                dataFiles.addAll(Arrays.asList(writeResult.dataFiles()));
-            }
-            if (writeResult.deleteFiles() != null) {
-                deleteFiles.addAll(Arrays.asList(writeResult.deleteFiles()));
-            }
-
-            if (result.getCommitImmediately()) {
-                commitSnapshot(tableId, dataFiles, deleteFiles);
-                dataFiles.clear();
-                deleteFiles.clear();
-            }
-        }
+                        .map(WriteResultWrapper::getWriteResult)
+                        .filter(payload -> payload.dataFiles() != null)
+                        .flatMap(payload -> Arrays.stream(payload.dataFiles()))
+                        .filter(dataFile -> dataFile.recordCount() > 0)
+                        .collect(toList());
+        List<DeleteFile> deleteFiles =
+                results.stream()
+                        .map(WriteResultWrapper::getWriteResult)
+                        .filter(payload -> payload.deleteFiles() != null)
+                        .flatMap(payload -> Arrays.stream(payload.deleteFiles()))
+                        .filter(deleteFile -> deleteFile.recordCount() > 0)
+                        .collect(toList());
         commitSnapshot(tableId, dataFiles, deleteFiles);
     }
 

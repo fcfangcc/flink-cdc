@@ -35,14 +35,13 @@ public class WriteResultWrapper implements Serializable {
 
     private final TableId tableId;
 
-    private final long timestamp;
+    private long timestamp;
 
-    private boolean commitImmediately;
+    private Long eventId;
 
     public WriteResultWrapper(WriteResult writeResult, TableId tableId) {
         this.writeResult = writeResult;
         this.tableId = tableId;
-        this.commitImmediately = false;
         this.timestamp = Instant.now().toEpochMilli();
     }
 
@@ -54,16 +53,20 @@ public class WriteResultWrapper implements Serializable {
         return tableId;
     }
 
-    public boolean getCommitImmediately() {
-        return commitImmediately;
-    }
-
-    public void setCommitImmediately(boolean commitImm) {
-        commitImmediately = commitImm;
-    }
-
     public long getTimestamp() {
         return timestamp;
+    }
+
+    public void setTimestamp(long timestamp) {
+        this.timestamp = timestamp;
+    }
+
+    public void setEventId(Long eventId) {
+        this.eventId = eventId;
+    }
+
+    public Long getEventId() {
+        return eventId;
     }
 
     /** Build a simple description for the write result. */
@@ -90,8 +93,8 @@ public class WriteResultWrapper implements Serializable {
                 + deleteCount
                 + ", AddDeleteFiles: "
                 + writeResult.deleteFiles().length
-                + ", CommitImmediately: "
-                + commitImmediately
+                + ", EventId: "
+                + eventId
                 + ", Timestamp: "
                 + timestamp;
     }

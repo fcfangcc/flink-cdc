@@ -43,13 +43,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /** A {@link SinkWriter} for Apache Iceberg. */
 public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWrapper> {
@@ -64,7 +64,7 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
 
     private Map<TableId, TaskWriter<RowData>> writerMap;
 
-    private Map<TableId, List<TaskWriter<RowData>>> writerSnapshotMap;
+    private List<TemplateWriter> templateWriters;
 
     private Map<TableId, TableSchemaWrapper> schemaMap;
 
@@ -76,27 +76,39 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
 
     private final ZoneId zoneId;
 
+    private static class TemplateWriter {
+        private final TableId tableId;
+        private final TaskWriter<RowData> writer;
+        private final long timestamp;
+        private final long eventId;
+
+        private TemplateWriter(long eventId, TableId tableId, TaskWriter<RowData> writer) {
+            this.eventId = eventId;
+            this.tableId = tableId;
+            this.writer = writer;
+            this.timestamp = Instant.now().toEpochMilli();
+        }
+    }
+
     public IcebergWriter(
             Map<String, String> catalogOptions, int taskId, int attemptId, ZoneId zoneId) {
         catalog =
                 CatalogUtil.buildIcebergCatalog(
                         this.getClass().getSimpleName(), catalogOptions, new Configuration());
         writerFactoryMap = new HashMap<>();
-        writerSnapshotMap = new HashMap<>();
         writerMap = new HashMap<>();
         schemaMap = new HashMap<>();
         this.taskId = taskId;
         this.attemptId = attemptId;
         this.zoneId = zoneId;
+        this.templateWriters = new ArrayList<>();
     }
 
-    private void saveAndRemoveCurrentWriter(TableId tableId) {
+    private void saveAndRemoveCurrentWriter(TableId tableId, int eventId) {
         LOGGER.info("Got saveAndRemoveCurrentWriter: {}", tableId.identifier());
         TaskWriter<RowData> writer = writerMap.remove(tableId);
         if (writer != null) {
-            List<TaskWriter<RowData>> writers =
-                    writerSnapshotMap.computeIfAbsent(tableId, tableId1 -> new ArrayList<>());
-            writers.add(writer);
+            this.templateWriters.add(new TemplateWriter(eventId, tableId, writer));
         }
         writerFactoryMap.remove(tableId);
     }
@@ -150,7 +162,8 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
                 newSchema =
                         SchemaUtils.applySchemaChangeEvent(
                                 tableSchemaWrapper.getSchema(), schemaChangeEvent);
-                saveAndRemoveCurrentWriter(tableId);
+                // todo: 判断是否支持的事件/是否需要flush的事件
+                saveAndRemoveCurrentWriter(tableId, schemaChangeEvent.hashCode());
             } else {
                 newSchema = SchemaUtils.applySchemaChangeEvent(null, schemaChangeEvent);
             }
@@ -167,18 +180,17 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
 
     private List<WriteResultWrapper> getWriteResult() throws IOException {
         List<WriteResultWrapper> writeResults = new ArrayList<>();
-        for (Map.Entry<TableId, List<TaskWriter<RowData>>> entry : writerSnapshotMap.entrySet()) {
-            for (TaskWriter<RowData> writer : entry.getValue()) {
-                WriteResultWrapper writeResultWrapper =
-                        new WriteResultWrapper(writer.complete(), entry.getKey());
-                writeResultWrapper.setCommitImmediately(true);
-                writeResults.add(writeResultWrapper);
-                LOGGER.info(
-                        "flush complete file immediately taskId: {}, table: {}, writeResult: {}",
-                        this.taskId,
-                        entry.getKey().getTableName(),
-                        writeResultWrapper.buildDescription());
-            }
+        for (TemplateWriter entry : templateWriters) {
+            WriteResultWrapper writeResultWrapper =
+                    new WriteResultWrapper(entry.writer.complete(), entry.tableId);
+            writeResultWrapper.setTimestamp(entry.timestamp);
+            writeResultWrapper.setEventId(entry.eventId);
+            writeResults.add(writeResultWrapper);
+            LOGGER.info(
+                    "flush complete file immediately taskId: {}, table: {}, writeResult: {}",
+                    this.taskId,
+                    entry.tableId.getTableName(),
+                    writeResultWrapper.buildDescription());
         }
 
         for (Map.Entry<TableId, TaskWriter<RowData>> entry : writerMap.entrySet()) {
@@ -194,7 +206,7 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
 
         writerMap.clear();
         writerFactoryMap.clear();
-        writerSnapshotMap.clear();
+        templateWriters.clear();
         return writeResults;
     }
 
@@ -216,16 +228,11 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
             writerMap = null;
         }
 
-        if (writerSnapshotMap != null) {
-            for (TaskWriter<RowData> writer :
-                    writerSnapshotMap.entrySet().stream()
-                            .flatMap(entry -> entry.getValue().stream())
-                            .collect(Collectors.toList())) {
-                writer.close();
-            }
-            writerSnapshotMap.clear();
-            writerSnapshotMap = null;
+        for (TemplateWriter templateWriter : templateWriters) {
+            templateWriter.writer.close();
         }
+        templateWriters.clear();
+        templateWriters = null;
 
         if (writerFactoryMap != null) {
             writerFactoryMap.clear();
