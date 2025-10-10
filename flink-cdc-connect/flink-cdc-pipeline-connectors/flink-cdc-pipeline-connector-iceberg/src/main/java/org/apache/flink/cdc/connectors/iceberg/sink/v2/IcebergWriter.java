@@ -91,6 +91,7 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
     }
 
     private void saveAndRemoveCurrentWriter(TableId tableId) {
+        LOGGER.info("Got saveAndRemoveCurrentWriter: {}", tableId.identifier());
         TaskWriter<RowData> writer = writerMap.remove(tableId);
         if (writer != null) {
             List<TaskWriter<RowData>> writers =
@@ -138,6 +139,11 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
         } else {
             SchemaChangeEvent schemaChangeEvent = (SchemaChangeEvent) event;
             TableId tableId = schemaChangeEvent.tableId();
+            LOGGER.info(
+                    "Got schema change event tableId: {}, class:{} -> {}",
+                    tableId.getTableName(),
+                    schemaChangeEvent.getClass().getName(),
+                    schemaChangeEvent);
             TableSchemaWrapper tableSchemaWrapper = schemaMap.get(tableId);
             Schema newSchema;
             if (tableSchemaWrapper != null) {
@@ -153,9 +159,10 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
     }
 
     @Override
-    public void flush(boolean flush) throws IOException {
+    public void flush(boolean endOfInput) throws IOException {
         // Notice: flush method may be called many times during one checkpoint.
         // do nothing as Write will write buffer to file.
+        LOGGER.info("Got flush event with taskId: {}, endOfInput:{}", this.taskId, endOfInput);
     }
 
     private List<WriteResultWrapper> getWriteResult() throws IOException {
@@ -166,7 +173,11 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
                         new WriteResultWrapper(writer.complete(), entry.getKey());
                 writeResultWrapper.setCommitImmediately(true);
                 writeResults.add(writeResultWrapper);
-                LOGGER.info(writeResultWrapper.buildDescription());
+                LOGGER.info(
+                        "flush complete file immediately taskId: {}, table: {}, writeResult: {}",
+                        this.taskId,
+                        entry.getKey().getTableName(),
+                        writeResultWrapper.buildDescription());
             }
         }
 
@@ -174,7 +185,11 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
             WriteResultWrapper writeResultWrapper =
                     new WriteResultWrapper(entry.getValue().complete(), entry.getKey());
             writeResults.add(writeResultWrapper);
-            LOGGER.info(writeResultWrapper.buildDescription());
+            LOGGER.info(
+                    "flush complete file taskId: {}, table: {}, writeResult: {}",
+                    this.taskId,
+                    entry.getKey().getTableName(),
+                    writeResultWrapper.buildDescription());
         }
 
         writerMap.clear();

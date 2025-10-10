@@ -43,6 +43,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static java.util.stream.Collectors.toList;
 
@@ -84,6 +85,7 @@ public class IcebergCommitter implements Committer<WriteResultWrapper> {
     }
 
     private void commit(List<WriteResultWrapper> writeResultWrappers) {
+        LOGGER.info("start flush and commit sink");
         Map<TableId, List<WriteResultWrapper>> tableMap = new HashMap<>();
         for (WriteResultWrapper writeResultWrapper : writeResultWrappers) {
             List<WriteResultWrapper> writeResult =
@@ -101,6 +103,10 @@ public class IcebergCommitter implements Committer<WriteResultWrapper> {
         List<DataFile> dataFiles = new ArrayList<>();
         List<DeleteFile> deleteFiles = new ArrayList<>();
         results.sort(Comparator.comparingLong(WriteResultWrapper::getTimestamp));
+        LOGGER.info(
+                results.stream()
+                        .map(WriteResultWrapper::buildDescription)
+                        .collect(Collectors.joining(" | ")));
         for (WriteResultWrapper result : results) {
             WriteResult writeResult = result.getWriteResult();
             if (writeResult.dataFiles() != null) {
