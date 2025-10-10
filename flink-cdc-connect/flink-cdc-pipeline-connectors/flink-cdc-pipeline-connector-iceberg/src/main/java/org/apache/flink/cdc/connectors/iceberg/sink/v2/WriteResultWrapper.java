@@ -24,6 +24,7 @@ import org.apache.iceberg.DeleteFile;
 import org.apache.iceberg.io.WriteResult;
 
 import java.io.Serializable;
+import java.time.Instant;
 
 /** A wrapper class for {@link WriteResult} and {@link TableId}. */
 public class WriteResultWrapper implements Serializable {
@@ -34,9 +35,15 @@ public class WriteResultWrapper implements Serializable {
 
     private final TableId tableId;
 
+    private final long timestamp;
+
+    private boolean commitImmediately;
+
     public WriteResultWrapper(WriteResult writeResult, TableId tableId) {
         this.writeResult = writeResult;
         this.tableId = tableId;
+        this.commitImmediately = false;
+        this.timestamp = Instant.now().toEpochMilli();
     }
 
     public WriteResult getWriteResult() {
@@ -45,6 +52,18 @@ public class WriteResultWrapper implements Serializable {
 
     public TableId getTableId() {
         return tableId;
+    }
+
+    public boolean getCommitImmediately() {
+        return commitImmediately;
+    }
+
+    public void setCommitImmediately(boolean commitImm) {
+        commitImmediately = commitImm;
+    }
+
+    public long getTimestamp() {
+        return timestamp;
     }
 
     /** Build a simple description for the write result. */
@@ -66,6 +85,8 @@ public class WriteResultWrapper implements Serializable {
                 + ", AddCount: "
                 + addCount
                 + ", DeleteCount: "
-                + deleteCount;
+                + deleteCount
+                + ", CommitImmediately: "
+                + commitImmediately;
     }
 }
