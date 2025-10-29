@@ -26,6 +26,8 @@ public class CompactionOptions implements Serializable {
     private int commitInterval = 1;
     private boolean enabled = false;
     private int parallelism = -1;
+    // todo: from config
+    private static final boolean ignoreError = true;
 
     // Private constructor to enforce the use of the Builder
     private CompactionOptions() {}
@@ -52,6 +54,10 @@ public class CompactionOptions implements Serializable {
 
     public void setParallelism(int parallelism) {
         this.parallelism = parallelism;
+    }
+
+    public boolean isIgnoreError() {
+        return ignoreError;
     }
 
     public static Builder builder() {

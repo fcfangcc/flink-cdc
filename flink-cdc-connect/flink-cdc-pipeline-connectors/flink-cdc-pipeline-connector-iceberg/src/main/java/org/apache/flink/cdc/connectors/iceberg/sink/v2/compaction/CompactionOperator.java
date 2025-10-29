@@ -62,6 +62,8 @@ public class CompactionOperator
 
     private final CompactionOptions compactionOptions;
 
+    private final CompactionMetric compactionMetric;
+
     private volatile Throwable throwable;
 
     private ExecutorService compactExecutor;
@@ -72,6 +74,7 @@ public class CompactionOperator
         this.compactedTables = new HashSet<>();
         this.catalogOptions = catalogOptions;
         this.compactionOptions = compactionOptions;
+        this.compactionMetric = new CompactionMetric(this.metrics);
     }
 
     @Override
@@ -94,12 +97,16 @@ public class CompactionOperator
                             .getTableId();
             tableCommitTimes.put(tableId, tableCommitTimes.getOrDefault(tableId, 0) + 1);
             int commitTimes = tableCommitTimes.get(tableId);
+            this.compactionMetric
+                    .getTableMetric(tableId)
+                    .ifPresent(m -> m.setIntervalTimes(commitTimes));
             if (commitTimes >= compactionOptions.getCommitInterval()
                     && !compactedTables.contains(tableId)) {
-                if (throwable != null) {
+
+                if (!compactionOptions.isIgnoreError() && throwable != null) {
                     throw new RuntimeException(throwable);
                 }
-                compactedTables.add(tableId);
+
                 if (compactExecutor == null) {
                     compact(tableId);
                 } else {
@@ -115,7 +122,10 @@ public class CompactionOperator
                     CatalogUtil.buildIcebergCatalog(
                             this.getClass().getSimpleName(), catalogOptions, new Configuration());
         }
+        String msgPrefix = "Iceberg small file compact for " + tableId.identifier();
+        compactedTables.add(tableId);
         try {
+            LOGGER.info(msgPrefix + "start.");
             RewriteDataFilesActionResult rewriteResult =
                     Actions.forTable(
                                     StreamExecutionEnvironment.createLocalEnvironment(),
@@ -123,12 +133,20 @@ public class CompactionOperator
                             .rewriteDataFiles()
                             .execute();
             LOGGER.info(
-                    "Iceberg small file compact result for {}: added {} data files and deleted {} files.",
+                    msgPrefix + "result: added {} data files and deleted {} files.",
                     tableId.identifier(),
                     rewriteResult.addedDataFiles().size(),
                     rewriteResult.deletedDataFiles().size());
+            this.compactionMetric
+                    .getTableMetric(tableId)
+                    .ifPresent(CompactionMetric.CompactMetrics::incCompactSuccessesTimes);
         } catch (Throwable t) {
+            compactedTables.remove(tableId);
+            LOGGER.error(msgPrefix + "failed!", t);
             throwable = t;
+            this.compactionMetric
+                    .getTableMetric(tableId)
+                    .ifPresent(CompactionMetric.CompactMetrics::incCompactFailuresTimes);
         }
     }
 
