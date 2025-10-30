@@ -1,17 +1,36 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.flink.cdc.connectors.iceberg.sink.v2.compaction;
 
 import org.apache.flink.cdc.common.event.TableId;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.MetricGroup;
 
+import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class CompactionMetric {
+/** A class to manage compaction metrics. */
+public class CompactionMetric implements Serializable {
     private final MetricGroup metricGroup;
-    private final Map<TableId, CompactMetrics> tableIdMetricMap;
+    private final Map<TableId, CompactMetricGroup> tableIdMetricMap;
     public static final String NAMESPACE_GROUP_KEY = "namespace";
     public static final String SCHEMA_GROUP_KEY = "schema";
     public static final String TABLE_GROUP_KEY = "table";
@@ -21,34 +40,40 @@ public class CompactionMetric {
         this.tableIdMetricMap = new HashMap<>();
     }
 
-    public Optional<CompactMetrics> getTableMetric(TableId tableId) {
+    public Optional<CompactMetricGroup> getTableMetric(TableId tableId) {
         if (metricGroup == null) {
             return Optional.empty();
         }
-        CompactMetrics metrics =
+        CompactMetricGroup metrics =
                 tableIdMetricMap.computeIfAbsent(
                         tableId,
                         k -> {
                             MetricGroup tableIdMetricGroup =
                                     metricGroup
-                                            .addGroup(NAMESPACE_GROUP_KEY, tableId.getNamespace())
                                             .addGroup(SCHEMA_GROUP_KEY, tableId.getSchemaName())
                                             .addGroup(TABLE_GROUP_KEY, tableId.getTableName());
-                            return new CompactMetrics(tableIdMetricGroup);
+                            if (tableId.getNamespace() != null) {
+                                tableIdMetricGroup =
+                                        tableIdMetricGroup.addGroup(
+                                                NAMESPACE_GROUP_KEY, tableId.getNamespace());
+                            }
+
+                            return new CompactMetricGroup(tableIdMetricGroup);
                         });
         return Optional.of(metrics);
     }
 
-    public static class CompactMetrics {
+    /** A class to commit compaction metrics. */
+    public static class CompactMetricGroup {
         private final AtomicInteger intervalTimes;
         private final Counter compactSuccessesTimes;
         private final Counter compactFailuresTimes;
 
-        public static final String COMPACT_INTERVAL_TIMES = "CompactIntervalTimes";
-        public static final String COMPACT_SUCCESSES_TIMES = "CompactSuccessesTimes";
-        public static final String COMPACT_FAILURES_TIMES = "CompactFailuresTimes";
+        public static final String COMPACT_INTERVAL_TIMES = "compactIntervalTimes";
+        public static final String COMPACT_SUCCESSES_TIMES = "compactSuccesses";
+        public static final String COMPACT_FAILURES_TIMES = "compactFailures";
 
-        public CompactMetrics(MetricGroup metricGroup) {
+        public CompactMetricGroup(MetricGroup metricGroup) {
             this.intervalTimes = new AtomicInteger(0);
             metricGroup.gauge(COMPACT_INTERVAL_TIMES, this.intervalTimes::intValue);
             this.compactSuccessesTimes = metricGroup.counter(COMPACT_SUCCESSES_TIMES);

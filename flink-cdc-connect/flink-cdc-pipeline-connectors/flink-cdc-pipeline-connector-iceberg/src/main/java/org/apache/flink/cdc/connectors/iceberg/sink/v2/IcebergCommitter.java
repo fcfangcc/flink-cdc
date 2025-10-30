@@ -173,9 +173,12 @@ public class IcebergCommitter implements Committer<WriteResultWrapper> {
             }
             MetricGroup tableIdMetricGroup =
                     metricGroup
-                            .addGroup(NAMESPACE_GROUP_KEY, tableId.getNamespace())
                             .addGroup(SCHEMA_GROUP_KEY, tableId.getSchemaName())
                             .addGroup(TABLE_GROUP_KEY, tableId.getTableName());
+            if (tableId.getNamespace() != null) {
+                tableIdMetricGroup =
+                        tableIdMetricGroup.addGroup(NAMESPACE_GROUP_KEY, tableId.getNamespace());
+            }
             TableMetric tableMetric = new TableMetric(tableIdMetricGroup);
             tableIdMetricMap.put(tableId, tableMetric);
             return Optional.of(tableMetric);

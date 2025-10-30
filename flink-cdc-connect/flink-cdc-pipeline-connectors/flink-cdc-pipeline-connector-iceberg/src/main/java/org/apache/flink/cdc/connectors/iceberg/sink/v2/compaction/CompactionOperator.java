@@ -62,7 +62,7 @@ public class CompactionOperator
 
     private final CompactionOptions compactionOptions;
 
-    private final CompactionMetric compactionMetric;
+    private CompactionMetric compactionMetric;
 
     private volatile Throwable throwable;
 
@@ -74,12 +74,13 @@ public class CompactionOperator
         this.compactedTables = new HashSet<>();
         this.catalogOptions = catalogOptions;
         this.compactionOptions = compactionOptions;
-        this.compactionMetric = new CompactionMetric(this.metrics);
+        this.compactionMetric = new CompactionMetric(this.getMetricGroup());
     }
 
     @Override
     public void open() throws Exception {
         super.open();
+        this.compactionMetric = new CompactionMetric(this.getMetricGroup());
         if (compactExecutor == null) {
             this.compactExecutor =
                     Executors.newSingleThreadScheduledExecutor(
@@ -139,14 +140,14 @@ public class CompactionOperator
                     rewriteResult.deletedDataFiles().size());
             this.compactionMetric
                     .getTableMetric(tableId)
-                    .ifPresent(CompactionMetric.CompactMetrics::incCompactSuccessesTimes);
+                    .ifPresent(CompactionMetric.CompactMetricGroup::incCompactSuccessesTimes);
         } catch (Throwable t) {
             compactedTables.remove(tableId);
             LOGGER.error(msgPrefix + "failed!", t);
             throwable = t;
             this.compactionMetric
                     .getTableMetric(tableId)
-                    .ifPresent(CompactionMetric.CompactMetrics::incCompactFailuresTimes);
+                    .ifPresent(CompactionMetric.CompactMetricGroup::incCompactFailuresTimes);
         }
     }
 
