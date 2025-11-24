@@ -58,6 +58,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.apache.flink.cdc.common.utils.Preconditions.checkNotNull;
 
@@ -76,6 +78,11 @@ public class IcebergMetadataApplier implements MetadataApplier {
     private final Map<TableId, List<String>> partitionMaps;
 
     private Set<SchemaChangeEventType> enabledSchemaEvolutionTypes;
+
+    private static final Pattern PARTITION_YEAR_PATTERN = Pattern.compile("^year\\((.*)\\)$");
+    private static final Pattern PARTITION_MONTH_PATTERN = Pattern.compile("^month\\((.*)\\)$");
+    private static final Pattern PARTITION_DAY_PATTERN = Pattern.compile("^day\\((.*)\\)$");
+    private static final Pattern PARTITION_HOUR_PATTERN = Pattern.compile("^hour\\((.*)\\)$");
 
     public IcebergMetadataApplier(Map<String, String> catalogOptions) {
         this(catalogOptions, new HashMap<>(), new HashMap<>());
@@ -161,13 +168,8 @@ public class IcebergMetadataApplier implements MetadataApplier {
             if (partitionMaps.containsKey(event.tableId())) {
                 partitionColumns = partitionMaps.get(event.tableId());
             }
-            PartitionSpec.Builder builder = PartitionSpec.builderFor(icebergSchema);
-            for (String name : partitionColumns) {
-                // TODO Add more partition transforms, see
-                // https://iceberg.apache.org/spec/#partition-transforms.
-                builder.identity(name);
-            }
-            PartitionSpec partitionSpec = builder.build();
+            PartitionSpec partitionSpec = generatePartitionSpec(icebergSchema, partitionColumns);
+
             if (!catalog.tableExists(tableIdentifier)) {
                 catalog.createTable(tableIdentifier, icebergSchema, partitionSpec, tableOptions);
                 LOG.info(
@@ -178,6 +180,44 @@ public class IcebergMetadataApplier implements MetadataApplier {
         } catch (Exception e) {
             throw new SchemaEvolveException(event, e.getMessage(), e);
         }
+    }
+
+    private PartitionSpec generatePartitionSpec(Schema schema, List<String> partitionColumns) {
+        PartitionSpec.Builder builder = PartitionSpec.builderFor(schema);
+        for (String name : partitionColumns) {
+            Matcher matcherYear = PARTITION_YEAR_PATTERN.matcher(name);
+            if (matcherYear.matches()) {
+                String matchedName = matcherYear.group(1);
+                builder.year(matchedName);
+                continue;
+            }
+
+            Matcher matcherMonth = PARTITION_MONTH_PATTERN.matcher(name);
+            if (matcherMonth.matches()) {
+                String matchedName = matcherMonth.group(1);
+                builder.month(matchedName);
+                continue;
+            }
+
+            Matcher matcherDay = PARTITION_DAY_PATTERN.matcher(name);
+            if (matcherDay.matches()) {
+                String matchedName = matcherDay.group(1);
+                builder.day(matchedName);
+                continue;
+            }
+
+            Matcher matcherHour = PARTITION_HOUR_PATTERN.matcher(name);
+            if (matcherHour.matches()) {
+                String matchedName = matcherHour.group(1);
+                builder.hour(matchedName);
+                continue;
+            }
+
+            // TODO Add more partition transforms, see
+            // https://iceberg.apache.org/spec/#partition-transforms.
+            builder.identity(name);
+        }
+        return builder.build();
     }
 
     private void applyAddColumn(AddColumnEvent event) {
