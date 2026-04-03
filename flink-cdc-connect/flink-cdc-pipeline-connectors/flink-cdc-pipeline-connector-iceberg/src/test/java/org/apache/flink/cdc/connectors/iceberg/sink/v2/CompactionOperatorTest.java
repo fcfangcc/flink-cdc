@@ -70,7 +70,7 @@ public class CompactionOperatorTest {
                 CatalogUtil.buildIcebergCatalog(
                         "cdc-iceberg-catalog", catalogOptions, new Configuration());
         IcebergWriter icebergWriter =
-                new IcebergWriter(catalogOptions, 1, 1, ZoneId.systemDefault());
+                new IcebergWriter(catalogOptions, 1, 1, ZoneId.systemDefault(), 0);
         IcebergMetadataApplier icebergMetadataApplier = new IcebergMetadataApplier(catalogOptions);
         TableId tableId = TableId.parse("test.iceberg_table");
 
@@ -155,7 +155,7 @@ public class CompactionOperatorTest {
         compactionOperator.processElement(
                 new StreamRecord<>(
                         new CommittableWithLineage<>(
-                                new WriteResultWrapper(null, tableId), 0L, 0)));
+                                new WriteResultWrapper(null, tableId, 100), 0L, 0)));
         Map<String, String> summary =
                 catalog.loadTable(TableIdentifier.parse(tableId.identifier()))
                         .currentSnapshot()

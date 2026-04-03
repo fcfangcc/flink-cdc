@@ -86,7 +86,7 @@ public class IcebergWriterTest {
                 CatalogUtil.buildIcebergCatalog(
                         "cdc-iceberg-catalog", catalogOptions, new Configuration());
         IcebergWriter icebergWriter =
-                new IcebergWriter(catalogOptions, 1, 1, ZoneId.systemDefault());
+                new IcebergWriter(catalogOptions, 1, 1, ZoneId.systemDefault(), 0);
         IcebergMetadataApplier icebergMetadataApplier = new IcebergMetadataApplier(catalogOptions);
         TableId tableId = TableId.parse("test.iceberg_table");
 
@@ -274,7 +274,7 @@ public class IcebergWriterTest {
                 CatalogUtil.buildIcebergCatalog(
                         "cdc-iceberg-catalog", catalogOptions, new Configuration());
         ZoneId pipelineZoneId = ZoneId.systemDefault();
-        IcebergWriter icebergWriter = new IcebergWriter(catalogOptions, 1, 1, pipelineZoneId);
+        IcebergWriter icebergWriter = new IcebergWriter(catalogOptions, 1, 1, pipelineZoneId, 0);
         IcebergMetadataApplier icebergMetadataApplier = new IcebergMetadataApplier(catalogOptions);
         TableId tableId = TableId.parse("test.iceberg_table");
 
@@ -361,7 +361,7 @@ public class IcebergWriterTest {
                 CatalogUtil.buildIcebergCatalog(
                         "cdc-iceberg-catalog", catalogOptions, new Configuration());
         IcebergWriter icebergWriter =
-                new IcebergWriter(catalogOptions, 1, 1, ZoneId.systemDefault());
+                new IcebergWriter(catalogOptions, 1, 1, ZoneId.systemDefault(), 0);
         IcebergMetadataApplier icebergMetadataApplier = new IcebergMetadataApplier(catalogOptions);
         TableId tableId = TableId.parse("test.iceberg_table");
 

@@ -38,10 +38,12 @@ public class WriteResultWrapper implements Serializable {
     private long timestamp;
 
     private Long eventId;
+    private final long checkpointId;
 
-    public WriteResultWrapper(WriteResult writeResult, TableId tableId) {
+    public WriteResultWrapper(WriteResult writeResult, TableId tableId, long checkpointId) {
         this.writeResult = writeResult;
         this.tableId = tableId;
+        this.checkpointId = checkpointId;
         this.timestamp = Instant.now().toEpochMilli();
     }
 
@@ -69,6 +71,10 @@ public class WriteResultWrapper implements Serializable {
         return eventId;
     }
 
+    public long getCheckpointId() {
+        return checkpointId;
+    }
+
     /** Build a simple description for the write result. */
     public String buildDescription() {
         long addCount = 0;
@@ -85,6 +91,8 @@ public class WriteResultWrapper implements Serializable {
         }
         return "WriteResult of "
                 + tableId
+                + ", CheckpointId: "
+                + checkpointId
                 + ", AddCount: "
                 + addCount
                 + ", AddDataFiles: "

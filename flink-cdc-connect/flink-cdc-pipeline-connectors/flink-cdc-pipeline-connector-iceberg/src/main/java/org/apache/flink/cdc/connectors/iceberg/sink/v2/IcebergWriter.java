@@ -20,6 +20,7 @@ package org.apache.flink.cdc.connectors.iceberg.sink.v2;
 import org.apache.flink.api.common.eventtime.Watermark;
 import org.apache.flink.api.connector.sink2.CommittingSinkWriter;
 import org.apache.flink.api.connector.sink2.SinkWriter;
+import org.apache.flink.api.connector.sink2.StatefulSinkWriter;
 import org.apache.flink.cdc.common.event.DataChangeEvent;
 import org.apache.flink.cdc.common.event.Event;
 import org.apache.flink.cdc.common.event.SchemaChangeEvent;
@@ -47,12 +48,15 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /** A {@link SinkWriter} for Apache Iceberg. */
-public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWrapper> {
+public class IcebergWriter
+        implements CommittingSinkWriter<Event, WriteResultWrapper>,
+                StatefulSinkWriter<Event, IcebergWriterState> {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(IcebergWriter.class);
 
@@ -76,6 +80,13 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
 
     private final ZoneId zoneId;
 
+    private long lastCheckpointId;
+
+    @Override
+    public List<IcebergWriterState> snapshotState(long checkpointId) throws IOException {
+        return Collections.singletonList(new IcebergWriterState(checkpointId));
+    }
+
     private static class TemplateWriter {
         private final TableId tableId;
         private final TaskWriter<RowData> writer;
@@ -91,7 +102,11 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
     }
 
     public IcebergWriter(
-            Map<String, String> catalogOptions, int taskId, int attemptId, ZoneId zoneId) {
+            Map<String, String> catalogOptions,
+            int taskId,
+            int attemptId,
+            ZoneId zoneId,
+            long lastCheckpointId) {
         catalog =
                 CatalogUtil.buildIcebergCatalog(
                         this.getClass().getSimpleName(), catalogOptions, new Configuration());
@@ -102,6 +117,8 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
         this.attemptId = attemptId;
         this.zoneId = zoneId;
         this.templateWriters = new ArrayList<>();
+        this.lastCheckpointId = lastCheckpointId;
+        LOGGER.info("Start iceberg writer with lastCheckpointId {}", lastCheckpointId);
     }
 
     private void saveAndRemoveCurrentWriter(TableId tableId, int eventId) {
@@ -115,7 +132,9 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
 
     @Override
     public Collection<WriteResultWrapper> prepareCommit() throws IOException, InterruptedException {
-        return getWriteResult();
+        List<WriteResultWrapper> commitResults = getWriteResult();
+        lastCheckpointId++;
+        return commitResults;
     }
 
     private RowDataTaskWriterFactory getRowDataTaskWriterFactory(TableId tableId) {
@@ -179,10 +198,12 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
     }
 
     private List<WriteResultWrapper> getWriteResult() throws IOException {
+        long currentCheckpointId = lastCheckpointId + 1;
         List<WriteResultWrapper> writeResults = new ArrayList<>();
         for (TemplateWriter entry : templateWriters) {
             WriteResultWrapper writeResultWrapper =
-                    new WriteResultWrapper(entry.writer.complete(), entry.tableId);
+                    new WriteResultWrapper(
+                            entry.writer.complete(), entry.tableId, currentCheckpointId);
             writeResultWrapper.setTimestamp(entry.timestamp);
             writeResultWrapper.setEventId(entry.eventId);
             writeResults.add(writeResultWrapper);
@@ -195,7 +216,8 @@ public class IcebergWriter implements CommittingSinkWriter<Event, WriteResultWra
 
         for (Map.Entry<TableId, TaskWriter<RowData>> entry : writerMap.entrySet()) {
             WriteResultWrapper writeResultWrapper =
-                    new WriteResultWrapper(entry.getValue().complete(), entry.getKey());
+                    new WriteResultWrapper(
+                            entry.getValue().complete(), entry.getKey(), currentCheckpointId);
             writeResults.add(writeResultWrapper);
             LOGGER.info(
                     "flush complete file taskId: {}, table: {}, writeResult: {}",

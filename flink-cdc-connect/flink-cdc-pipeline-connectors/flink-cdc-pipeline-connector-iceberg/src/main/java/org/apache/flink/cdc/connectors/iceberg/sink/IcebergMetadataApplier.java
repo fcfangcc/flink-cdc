@@ -173,9 +173,10 @@ public class IcebergMetadataApplier implements MetadataApplier {
             if (!catalog.tableExists(tableIdentifier)) {
                 catalog.createTable(tableIdentifier, icebergSchema, partitionSpec, tableOptions);
                 LOG.info(
-                        "Spend {} ms to create iceberg table {}",
+                        "Spend {} ms to create iceberg table {} with partition {}",
                         System.currentTimeMillis() - startTimestamp,
-                        tableIdentifier);
+                        tableIdentifier,
+                        partitionSpec.toString());
             }
         } catch (Exception e) {
             throw new SchemaEvolveException(event, e.getMessage(), e);

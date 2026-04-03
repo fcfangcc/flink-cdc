@@ -25,11 +25,14 @@ import org.apache.flink.cdc.common.factories.FactoryHelper;
 import org.apache.flink.cdc.common.pipeline.PipelineOptions;
 import org.apache.flink.cdc.common.sink.DataSink;
 import org.apache.flink.cdc.connectors.iceberg.sink.utils.OptionUtils;
+import org.apache.flink.cdc.connectors.iceberg.sink.v2.IcebergWriter;
 import org.apache.flink.cdc.connectors.iceberg.sink.v2.compaction.CompactionOptions;
 
 import org.apache.flink.shaded.guava31.com.google.common.collect.ImmutableMap;
 
 import org.apache.iceberg.CatalogProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.ZoneId;
 import java.util.Arrays;
@@ -45,7 +48,7 @@ import static org.apache.flink.cdc.connectors.iceberg.sink.IcebergDataSinkOption
 
 /** A {@link DataSinkFactory} for Apache Iceberg. */
 public class IcebergDataSinkFactory implements DataSinkFactory {
-
+    private static final Logger LOGGER = LoggerFactory.getLogger(IcebergWriter.class);
     public static final String IDENTIFIER = "iceberg";
 
     // Hard code to disable catalog cache as we always need latest schema after schema change.
@@ -91,10 +94,10 @@ public class IcebergDataSinkFactory implements DataSinkFactory {
 
         Map<TableId, List<String>> partitionMaps = new HashMap<>();
         String partitionKey =
-                context.getPipelineConfiguration().get(IcebergDataSinkOptions.PARTITION_KEY);
-        if (!partitionKey.isEmpty()) {
-            for (String tables : partitionKey.split(";")) {
-                String[] splits = tables.split(":");
+                context.getFactoryConfiguration().get(IcebergDataSinkOptions.PARTITION_KEY);
+        if (partitionKey != null && !partitionKey.isEmpty()) {
+            for (String tables : partitionKey.trim().split(";")) {
+                String[] splits = tables.trim().split(":");
                 if (splits.length == 2) {
                     TableId tableId = TableId.parse(splits[0]);
                     List<String> partitions = Arrays.asList(splits[1].split(","));
@@ -106,6 +109,8 @@ public class IcebergDataSinkFactory implements DataSinkFactory {
                 }
             }
         }
+
+        LOGGER.info("sink with partition Maps:{}", partitionMaps);
 
         return new IcebergDataSink(
                 catalogOptions,
